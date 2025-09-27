@@ -1,0 +1,23 @@
+# Terraform build artifacts
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Sensitive variable files (often contain secrets)
+*.auto.tfvars
+
+# Plan output files
+*.tfplan
+
+# Override files (usually local only)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Core dumps
+*.core
