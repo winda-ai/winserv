@@ -7,6 +7,9 @@ on:
         description: "Target environment (matches directory under workspace/, e.g. dev, prod)"
         required: true
         default: dev
+        type: choice
+        options:
+          - dev
       action:
         description: "Terraform action to perform"
         required: true
