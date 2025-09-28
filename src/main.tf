@@ -45,7 +45,7 @@ resource "azurerm_key_vault" "kv" {
     soft_delete_retention_days  = 7
     public_network_access_enabled = true
     enabled_for_disk_encryption = true
-    enable_rbac_authorization   = true
+    rbac_authorization_enabled   = true
     tags                        = var.tags
 }
 
@@ -171,27 +171,33 @@ resource "azurerm_virtual_machine_extension" "enable_hyperv" {
   type                       = "CustomScriptExtension"
   type_handler_version       = "1.10"
   auto_upgrade_minor_version = true
+  # Single script: enable features, create one-time verification scheduled task, reboot.
   settings = jsonencode({
-    commandToExecute = "powershell -ExecutionPolicy Bypass -Command \"Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRestart; Enable-WindowsOptionalFeature -Online -FeatureName Containers -All -NoRestart; Restart-Computer -Force\""
+    commandToExecute = <<-EOT
+      powershell -ExecutionPolicy Bypass -Command "
+        Write-Host 'Enabling Hyper-V & Containers features';
+        Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRestart;
+        Enable-WindowsOptionalFeature -Online -FeatureName Containers -All -NoRestart;
+        $verifyScript = @'
+          $r = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V;
+          $s = systeminfo | Select-String 'Hyper-V Requirements';
+          New-Item -ItemType Directory -Path C:/HyperVTest -Force | Out-Null;
+          ($r | Out-String) + ($s | Out-String) | Out-File C:/HyperVTest/verification.txt;
+          schtasks /Delete /TN HyperVVerify /F 2>$null;
+        '@;
+        $scriptPath = 'C:/HyperVTest/VerifyHyperV.ps1';
+        New-Item -ItemType Directory -Path C:/HyperVTest -Force | Out-Null;
+        Set-Content -Path $scriptPath -Value $verifyScript -Encoding UTF8;
+        schtasks /Create /SC ONSTART /RU SYSTEM /RL HIGHEST /TN HyperVVerify /TR "powershell -ExecutionPolicy Bypass -File $scriptPath" /F;
+        Write-Host 'Scheduled verification task HyperVVerify';
+        Restart-Computer -Force;"
+    EOT
   })
   tags = var.tags
   depends_on = [azurerm_windows_virtual_machine.vm]
 }
 
 # Post-verify Hyper-V (after reboot) by writing verification output; typically run via a second extension pass.
-resource "azurerm_virtual_machine_extension" "verify_hyperv" {
-  count                = var.enable_hyperv ? 1 : 0
-  name                 = "VerifyHyperV"
-  virtual_machine_id   = azurerm_windows_virtual_machine.vm.id
-  publisher            = "Microsoft.Compute"
-  type                 = "CustomScriptExtension"
-  type_handler_version = "1.10"
-  settings = jsonencode({
-    commandToExecute = "powershell -ExecutionPolicy Bypass -Command \"$r=Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V; $s=systeminfo | Select-String 'Hyper-V Requirements'; New-Item -ItemType Directory -Path C:/HyperVTest -Force | Out-Null; ($r | Out-String) + ($s | Out-String) | Out-File C:/HyperVTest/verification.txt;\""
-  })
-  tags = var.tags
-  depends_on = [azurerm_virtual_machine_extension.enable_hyperv]
-}
 resource "azurerm_virtual_machine_extension" "aad_login" {
   name                        = "AADLoginForWindows"
   virtual_machine_id          = azurerm_windows_virtual_machine.vm.id
