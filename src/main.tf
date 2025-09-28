@@ -22,17 +22,6 @@ locals {
   avd_app_group_name  = "${var.name_prefix}-appgroup"
   hyperv_supported_size  = contains(var.allowed_vm_sizes, var.vm_size)
   hyperv_supported_image = (lower(azurerm_windows_virtual_machine.vm.source_image_reference[0].publisher) == "microsoftwindowsdesktop")
-
-  # Public IP detection (string) -> append /32 to create a CIDR; if empty, result is null.
-  inferred_rdp_ip = try(
-    length(trimspace(data.http.my_ip.response_body)) > 0 ? "${trimspace(data.http.my_ip.response_body)}/32" : null,
-    null
-  )
-
-  # Decide effective list of RDP source IPs: user-provided list wins; otherwise detected IP; else empty list.
-  effective_rdp_ips = length(var.rdp_allowed_source_ips) > 0 ? var.rdp_allowed_source_ips : (
-    local.inferred_rdp_ip != null ? [local.inferred_rdp_ip] : []
-  )
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -57,18 +46,12 @@ resource "azurerm_key_vault" "kv" {
   public_network_access_enabled = true
   enabled_for_disk_encryption = true
 
-  access_policy {
-    tenant_id = data.azurerm_client_config.current.tenant_id
-    object_id = data.azurerm_client_config.current.object_id
-    secret_permissions = ["Get", "List", "Set", "Delete"]
-  }
-
   dynamic "access_policy" {
-    for_each = var.additional_key_vault_user_object_ids
+    for_each = var.key_vault_user_object_ids
     content {
       tenant_id = data.azurerm_client_config.current.tenant_id
       object_id = access_policy.value
-      secret_permissions = ["Get", "List"]
+      secret_permissions = ["Get", "List", "Set", "Delete"]
     }
   }
 
@@ -103,27 +86,28 @@ resource "azurerm_network_security_group" "nsg" {
   tags                = var.tags
 
   # Create one RDP allow rule per effective source IP. No open wildcard rule is created.
-  dynamic "security_rule" {
-    for_each = { for idx, ip in local.effective_rdp_ips : idx => ip }
+dynamic "security_rule" {
+    # local.effective_rdp_ips expected as a map(string) of name => cidr (e.g. { home = "98.51.6.220/24", commute = "192.168.0.2/24" })
+    # Create deterministic ordering by sorting keys, then assign priorities 100,110,120,...
+    for_each = {
+        for idx, k in sort(keys(var.rdp_allowed_source_ips)) :
+        k => {
+            cidr     = var.rdp_allowed_source_ips[k]
+            priority = 100 + idx * 10
+        }
+    }
     content {
-      name                       = "rdp-${security_rule.key}"
-      priority                   = 100 + tonumber(security_rule.key) * 10
-      direction                  = "Inbound"
-      access                     = "Allow"
-      protocol                   = "Tcp"
-      source_port_range          = "*"
-      destination_port_range     = "3389"
-      source_address_prefix      = security_rule.value
-      destination_address_prefix = "*"
+        name                       = "rdp-${security_rule.key}"
+        priority                   = security_rule.value.priority
+        direction                  = "Inbound"
+        access                     = "Allow"
+        protocol                   = "Tcp"
+        source_port_range          = "*"
+        destination_port_range     = "3389"
+        source_address_prefix      = security_rule.value.cidr
+        destination_address_prefix = "*"
     }
-  }
-
-  lifecycle {
-    precondition {
-      condition     = length(local.effective_rdp_ips) > 0
-      error_message = "No RDP source IPs determined. Provide rdp_allowed_source_ips or allow automatic detection to succeed."
-    }
-  }
+}
 }
 
 resource "azurerm_subnet_network_security_group_association" "subnet_assoc" {
@@ -289,7 +273,7 @@ resource "azurerm_virtual_desktop_host_pool" "host_pool" {
 # Token expires after 24h; a new apply refreshes it and may update the extension if changed.
 resource "azurerm_virtual_desktop_host_pool_registration_info" "reg" {
   hostpool_id      = azurerm_virtual_desktop_host_pool.host_pool.id
-  expiration_date  = timeadd(timestamp(), "24h")
+  expiration_date  = timeadd(timestamp(), "72h")
 }
 
 resource "azurerm_virtual_desktop_workspace" "workspace" {

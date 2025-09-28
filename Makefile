@@ -36,19 +36,18 @@ define ensure-az-login
 endef
 
 init:
-	$(call ensure-az-login)
 	terraform -chdir=$(TF_DIR) init -upgrade -backend-config=$(BACKEND_CONFIG)
 
 plan: init
 	terraform -chdir=$(TF_DIR) plan -var-file=$(VARS_FILE)
 
-plan-save: init
+plan-save:
 	terraform -chdir=$(TF_DIR) plan -out=tfplan -var-file=$(VARS_FILE)
 
-apply: init
+apply:
 	terraform -chdir=$(TF_DIR) apply -auto-approve -var-file=$(VARS_FILE)
 
-destroy: init
+destroy:
 	terraform -chdir=$(TF_DIR) destroy -auto-approve -var-file=$(VARS_FILE)
 
 show:
