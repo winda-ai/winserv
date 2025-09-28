@@ -247,6 +247,12 @@ resource "azurerm_virtual_machine_extension" "dsc" {
       hostPoolName             = azurerm_virtual_desktop_host_pool.host_pool.name
     }
   })
+  # Provide the AVD registration token as protected settings so it is not stored in plain state output.
+  protected_settings = jsonencode({
+    properties = {
+      registrationInfoToken = azurerm_virtual_desktop_host_pool_registration_info.reg.token
+    }
+  })
   tags = var.tags
 }
 
@@ -277,6 +283,13 @@ resource "azurerm_virtual_desktop_host_pool" "host_pool" {
   validate_environment     = false
   custom_rdp_properties    = var.avd_custom_rdp_properties
   tags = var.tags
+}
+
+# AVD host pool registration info (token) used by DSC extension to add the session host.
+# Token expires after 24h; a new apply refreshes it and may update the extension if changed.
+resource "azurerm_virtual_desktop_host_pool_registration_info" "reg" {
+  hostpool_id      = azurerm_virtual_desktop_host_pool.host_pool.id
+  expiration_date  = timeadd(timestamp(), "24h")
 }
 
 resource "azurerm_virtual_desktop_workspace" "workspace" {

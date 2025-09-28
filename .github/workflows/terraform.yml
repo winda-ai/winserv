@@ -1,0 +1,115 @@
+name: Terraform Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (matches directory under workspace/, e.g. dev, prod)"
+        required: true
+        default: dev
+      action:
+        description: "Terraform action to perform"
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+permissions:
+  id-token: write   # Needed for OIDC federated Azure login
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_CLI_ARGS_init: -upgrade
+  WORKING_DIR: src
+
+jobs:
+  terraform:
+    name: Terraform ${{ github.event.inputs.action }} (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure backend config exists
+        id: backend
+        run: |
+          BACKEND_PATH="workspace/${{ github.event.inputs.environment }}/backend.config"
+          if [ ! -f "$BACKEND_PATH" ]; then
+            echo "Backend config not found: $BACKEND_PATH" >&2
+            exit 1
+          fi
+          echo "backend_path=$BACKEND_PATH" >> $GITHUB_OUTPUT
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+          cli_config_credentials_token: ''
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate Azure creds
+        run: az account show
+
+      - name: Select environment vars file (optional)
+        id: vars
+        run: |
+          VARS_FILE="workspace/${{ github.event.inputs.environment }}/terraform.tfvars"
+          if [ -f "$VARS_FILE" ]; then
+            echo "vars_flag=-var-file=$VARS_FILE" >> $GITHUB_OUTPUT
+          else
+            echo "vars_flag=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Terraform Init
+        run: |
+          terraform -chdir=$WORKING_DIR init -backend-config=${{ steps.backend.outputs.backend_path }}
+
+      - name: Terraform Validate
+        run: terraform -chdir=$WORKING_DIR validate
+
+      - name: Terraform Plan
+        if: ${{ github.event.inputs.action == 'plan' }}
+        run: terraform -chdir=$WORKING_DIR plan ${{ steps.vars.outputs.vars_flag }}
+
+      - name: Terraform Apply
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: terraform -chdir=$WORKING_DIR apply -auto-approve ${{ steps.vars.outputs.vars_flag }}
+
+      - name: Terraform Destroy
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        run: terraform -chdir=$WORKING_DIR destroy -auto-approve ${{ steps.vars.outputs.vars_flag }}
+
+      - name: Show Outputs (plan/apply only)
+        if: ${{ github.event.inputs.action != 'destroy' }}
+        run: terraform -chdir=$WORKING_DIR output -json | jq '.'
+
+      - name: Upload Plan Artifact
+        if: ${{ github.event.inputs.action == 'plan' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf-plan-${{ github.event.inputs.environment }}
+          path: ${{ github.workspace }}/$WORKING_DIR/terraform.tfplan
+          if-no-files-found: ignore
+
+      - name: Post Run Summary
+        if: always()
+        run: |
+          echo "Action: ${{ github.event.inputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "Backend: ${{ steps.backend.outputs.backend_path }}" >> $GITHUB_STEP_SUMMARY
