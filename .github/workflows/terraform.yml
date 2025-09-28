@@ -69,45 +69,46 @@ jobs:
       - name: Validate Azure creds
         run: az account show
 
-      - name: Select environment vars file (optional)
-        id: vars
-        run: |
-          VARS_FILE="workspace/${{ github.event.inputs.environment }}/terraform.tfvars"
-          if [ -f "$VARS_FILE" ]; then
-            echo "vars_flag=-var-file=$VARS_FILE" >> $GITHUB_OUTPUT
-          else
-            echo "vars_flag=" >> $GITHUB_OUTPUT
-          fi
+      - name: Init (explicit)
+        run: make init ENV=${{ github.event.inputs.environment }}
 
-      - name: Terraform Init
-        run: |
-          terraform -chdir=$WORKING_DIR init -backend-config=${{ steps.backend.outputs.backend_path }}
+      - name: Validate
+        run: make validate ENV=${{ github.event.inputs.environment }}
 
-      - name: Terraform Validate
-        run: terraform -chdir=$WORKING_DIR validate
-
-      - name: Terraform Plan
+      - name: Plan (human readable)
         if: ${{ github.event.inputs.action == 'plan' }}
-        run: terraform -chdir=$WORKING_DIR plan ${{ steps.vars.outputs.vars_flag }}
+        run: make plan ENV=${{ github.event.inputs.environment }}
 
-      - name: Terraform Apply
+      - name: Plan (save binary)
+        if: ${{ github.event.inputs.action == 'plan' }}
+        run: make plan-save ENV=${{ github.event.inputs.environment }}
+
+      - name: Apply
         if: ${{ github.event.inputs.action == 'apply' }}
-        run: terraform -chdir=$WORKING_DIR apply -auto-approve ${{ steps.vars.outputs.vars_flag }}
+        run: make apply ENV=${{ github.event.inputs.environment }}
 
-      - name: Terraform Destroy
+      - name: Destroy
         if: ${{ github.event.inputs.action == 'destroy' }}
-        run: terraform -chdir=$WORKING_DIR destroy -auto-approve ${{ steps.vars.outputs.vars_flag }}
+        run: make destroy ENV=${{ github.event.inputs.environment }}
 
       - name: Show Outputs (plan/apply only)
         if: ${{ github.event.inputs.action != 'destroy' }}
-        run: terraform -chdir=$WORKING_DIR output -json | jq '.'
+        run: make outputs ENV=${{ github.event.inputs.environment }} | tee outputs.txt
 
       - name: Upload Plan Artifact
         if: ${{ github.event.inputs.action == 'plan' }}
         uses: actions/upload-artifact@v4
         with:
           name: tf-plan-${{ github.event.inputs.environment }}
-          path: ${{ github.workspace }}/$WORKING_DIR/terraform.tfplan
+          path: src/tfplan
+          if-no-files-found: error
+
+      - name: Upload Outputs (plan/apply)
+        if: ${{ github.event.inputs.action != 'destroy' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf-outputs-${{ github.event.inputs.environment }}
+          path: outputs.txt
           if-no-files-found: ignore
 
       - name: Post Run Summary
@@ -116,3 +117,4 @@ jobs:
           echo "Action: ${{ github.event.inputs.action }}" >> $GITHUB_STEP_SUMMARY
           echo "Environment: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "Backend: ${{ steps.backend.outputs.backend_path }}" >> $GITHUB_STEP_SUMMARY
+          if [ -f src/tfplan ]; then echo "Plan artifact: src/tfplan" >> $GITHUB_STEP_SUMMARY; fi
