@@ -13,7 +13,8 @@ terraform {
 }
 provider "azurerm" {
   features {}
-  subscription_id = "35c779b2-b36f-40ca-9ee5-d434a15742ef"
+  # Authentication handled via Azure CLI locally (user) or ARM_* env vars (OIDC in CI).
+  # subscription_id can be inferred from ARM_SUBSCRIPTION_ID; omit here for portability.
 }
 provider "http" {}
 

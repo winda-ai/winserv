@@ -70,6 +70,14 @@ jobs:
       - name: Validate Azure creds
         run: az account show
 
+      - name: Export Terraform SP OIDC environment
+        run: |
+          echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "Exported ARM_* vars for Terraform OIDC auth"
+
       - name: Init (explicit)
         run: make init ENV=${{ github.event.inputs.environment }}
 
