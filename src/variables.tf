@@ -62,7 +62,7 @@ variable "rdp_allowed_source_ips" {
 variable "enable_hyperv" {
   description = "Enable Hyper-V (nested virtualization) inside the Windows VM"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "allowed_vm_sizes" {
