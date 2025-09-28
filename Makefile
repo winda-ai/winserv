@@ -38,7 +38,7 @@ endef
 init:
 	terraform -chdir=$(TF_DIR) init -upgrade -backend-config=$(BACKEND_CONFIG)
 
-plan: init
+plan:
 	terraform -chdir=$(TF_DIR) plan -var-file=$(VARS_FILE)
 
 plan-save:
@@ -56,7 +56,7 @@ show:
 fmt:
 	terraform -chdir=$(TF_DIR) fmt -recursive
 
-validate: init
+validate:
 	terraform -chdir=$(TF_DIR) validate
 
 outputs:
