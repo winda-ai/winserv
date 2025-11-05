@@ -10,7 +10,7 @@ terraform {
     }
     bitwarden-secrets = {
       source  = "bitwarden/bitwarden-secrets"
-      version = "~> 0.5"
+      version = "0.5.4-pre"
     }
   }
   backend "azurerm" {}
