@@ -30,11 +30,13 @@ resource "azurerm_resource_group" "rg" {
   tags     = var.tags
 }
 
-resource "random_password" "vm_admin" {
-  length      = 8
-  special     = true
+# Fetch existing secret from Bitwarden to use as VM admin password (alternative to random generation).
+# Project: Windows Azure acaa66d4-4325-4791-ae66-b38c00297aea
+data "bitwarden-secrets_secret" "vm_login" {
+  id = "cc2be2dc-479f-4650-b65d-b38c002d9971"
 }
 
+# TODO: Cleanup: Remove random password generation if Bitwarden secret is used.
 resource "azurerm_key_vault" "kv" {
     name                        = local.kv_name
     location                    = var.location
@@ -51,7 +53,7 @@ resource "azurerm_key_vault" "kv" {
 
 resource "azurerm_key_vault_secret" "vm_admin_password" {
   name         = local.password_secret_name
-  value        = random_password.vm_admin.result
+  value        = data.bitwarden-secrets_secret.vm_login.value
   key_vault_id = azurerm_key_vault.kv.id
 }
 
@@ -147,12 +149,20 @@ resource "azurerm_windows_virtual_machine" "vm" {
     storage_account_type = "Premium_LRS"
   }
 
-  source_image_reference {
-    publisher = "MicrosoftWindowsDesktop"
-    offer     = "windows-10"
-    sku       = "win10-22h2-ent"
-    version   = "latest"
+  # When existing_os_disk_id is provided, create VM from that disk's snapshot/image
+  # Otherwise use marketplace image
+  dynamic "source_image_reference" {
+    for_each = var.existing_os_disk_id == null ? [1] : []
+    content {
+      publisher = "MicrosoftWindowsDesktop"
+      offer     = "windows-10"
+      sku       = "win10-22h2-ent"
+      version   = "latest"
+    }
   }
+
+  # Use source_image_id when restoring from existing disk (via snapshot converted to image)
+  source_image_id = var.existing_os_disk_id
 
   lifecycle {
     precondition {

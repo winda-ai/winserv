@@ -8,6 +8,10 @@ terraform {
       source  = "hashicorp/http"
       version = "~> 3.4"
     }
+    bitwarden-secrets = {
+      source = "bitwarden/bitwarden-secrets"
+      version = "~> 0.5"
+    }
   }
   backend "azurerm" {}
 }
@@ -24,5 +28,13 @@ provider "azurerm" {
   # Authentication handled via Azure CLI locally (user) or ARM_* env vars (OIDC in CI).
   # subscription_id can be inferred from ARM_SUBSCRIPTION_ID; omit here for portability.
 }
+
 provider "http" {}
+
+provider "bitwarden-secrets" {
+  api_url         = "https://vault.bitwarden.com/api"
+  identity_url    = "https://vault.bitwarden.com/identity"
+  # access_token    = "${var.bitwarden_access_token}" # BW_ACCESS_TOKEN env var used automatically
+  organization_id = "85e9ba59-b2af-45c6-9fee-b34500846195"
+}
 

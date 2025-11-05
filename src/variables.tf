@@ -100,3 +100,9 @@ variable "avd_start_vm_on_connect" {
   type        = bool
   default     = true
 }
+
+variable "existing_os_disk_id" {
+  description = "Resource ID of an Azure Image or Snapshot to restore the VM from (preserves installed apps and state). Provide the full resource ID of either: 1) an Azure Managed Image created from a VM, or 2) a Snapshot of an OS disk. Leave null to create a fresh VM from marketplace image."
+  type        = string
+  default     = null
+}
