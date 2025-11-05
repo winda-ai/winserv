@@ -19,7 +19,7 @@ output "vm_address" {
 }
 
 output "vm_id" {
-  value = azurerm_windows_virtual_machine.vm.id
+  value = try(azurerm_virtual_machine.vm[0].id, azurerm_windows_virtual_machine.vm[0].id)
 }
 
 output "key_vault_name" {

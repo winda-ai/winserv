@@ -102,7 +102,7 @@ variable "avd_start_vm_on_connect" {
 }
 
 variable "existing_os_disk_id" {
-  description = "Resource ID of an Azure Image or Snapshot to restore the VM from (preserves installed apps and state). Provide the full resource ID of either: 1) an Azure Managed Image created from a VM, or 2) a Snapshot of an OS disk. Leave null to create a fresh VM from marketplace image."
+  description = "Resource ID of an existing Azure managed disk to clone and use as the OS disk (preserves installed apps and state). Terraform will create a snapshot of this disk, then create a new disk from the snapshot to attach to the VM. The original disk is preserved and can be reused. Leave null to create a fresh VM from marketplace image. Example: /subscriptions/xxxxx/resourceGroups/rg-name/providers/Microsoft.Compute/disks/disk-name"
   type        = string
   default     = null
 }

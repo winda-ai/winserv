@@ -6,22 +6,31 @@ data "http" "my_ip" {
   url = "https://api.ipify.org?format=text"
 }
 
+# Reference existing disk if provided (to create snapshot from it)
+data "azurerm_managed_disk" "existing_disk" {
+  count               = var.existing_os_disk_id != null ? 1 : 0
+  name                = split("/", var.existing_os_disk_id)[8]
+  resource_group_name = split("/", var.existing_os_disk_id)[4]
+}
+
 locals {
-  rg_name                = "${var.name_prefix}-rg"
-  vnet_name              = "${var.name_prefix}-vnet"
-  subnet_name            = "${var.name_prefix}-subnet"
-  nsg_name               = "${var.name_prefix}-nsg"
-  nic_name               = "${var.name_prefix}-nic"
-  pip_name               = "${var.name_prefix}-pip"
-  kv_name                = replace(lower("${var.name_prefix}kv"), "_", "")
-  vm_name                = "${var.name_prefix}-vm"
-  osdisk_name            = "${var.name_prefix}-osdisk"
-  password_secret_name   = "${var.name_prefix}-vm-admin-password"
-  avd_host_pool_name     = "${var.name_prefix}-hostpool"
-  avd_workspace_name     = "${var.name_prefix}-workspace"
-  avd_app_group_name     = "${var.name_prefix}-appgroup"
-  hyperv_supported_size  = contains(var.allowed_vm_sizes, var.vm_size)
-  hyperv_supported_image = (lower(azurerm_windows_virtual_machine.vm.source_image_reference[0].publisher) == "microsoftwindowsdesktop")
+  rg_name              = "${var.name_prefix}-rg"
+  vnet_name            = "${var.name_prefix}-vnet"
+  subnet_name          = "${var.name_prefix}-subnet"
+  nsg_name             = "${var.name_prefix}-nsg"
+  nic_name             = "${var.name_prefix}-nic"
+  pip_name             = "${var.name_prefix}-pip"
+  kv_name              = replace(lower("${var.name_prefix}kv"), "_", "")
+  vm_name              = "${var.name_prefix}-vm"
+  osdisk_name          = "${var.name_prefix}-osdisk"
+  password_secret_name = "${var.name_prefix}-vm-admin-password"
+  avd_host_pool_name   = "${var.name_prefix}-hostpool"
+  avd_workspace_name   = "${var.name_prefix}-workspace"
+  avd_app_group_name   = "${var.name_prefix}-appgroup"
+  hyperv_supported_size = contains(var.allowed_vm_sizes, var.vm_size)
+  
+  # Abstract VM ID to handle both resource types
+  vm_id = var.existing_os_disk_id != null ? azurerm_virtual_machine.vm[0].id : azurerm_windows_virtual_machine.vm[0].id
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -132,7 +141,41 @@ resource "azurerm_network_interface" "nic" {
   }
 }
 
+# VM resource - handles both new image creation and existing disk attachment
+resource "azurerm_virtual_machine" "vm" {
+  count               = var.existing_os_disk_id != null ? 1 : 0
+  name                = local.vm_name
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  vm_size             = var.vm_size
+  network_interface_ids = [azurerm_network_interface.nic.id]
+  tags                = var.tags
+
+  delete_os_disk_on_termination = false  # Preserve disk for reuse
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  storage_os_disk {
+    name              = local.osdisk_name
+    caching           = "ReadWrite"
+    create_option     = "Attach"
+    managed_disk_id   = data.azurerm_managed_disk.existing_disk[0].id
+    os_type           = "Windows"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.enable_hyperv ? contains(var.allowed_vm_sizes, var.vm_size) : true
+      error_message = "Hyper-V enabled but VM size ${var.vm_size} not in allowed_vm_sizes list for nested virtualization."
+    }
+  }
+}
+
+# New VM resource for marketplace image (when no existing disk)
 resource "azurerm_windows_virtual_machine" "vm" {
+  count                 = var.existing_os_disk_id == null ? 1 : 0
   name                  = local.vm_name
   location              = var.location
   resource_group_name   = azurerm_resource_group.rg.name
@@ -150,20 +193,12 @@ resource "azurerm_windows_virtual_machine" "vm" {
     storage_account_type = "Premium_LRS"
   }
 
-  # When existing_os_disk_id is provided, create VM from that disk's snapshot/image
-  # Otherwise use marketplace image
-  dynamic "source_image_reference" {
-    for_each = var.existing_os_disk_id == null ? [1] : []
-    content {
-      publisher = "MicrosoftWindowsDesktop"
-      offer     = "windows-10"
-      sku       = "win10-22h2-ent"
-      version   = "latest"
-    }
+  source_image_reference {
+    publisher = "MicrosoftWindowsDesktop"
+    offer     = "windows-10"
+    sku       = "win10-22h2-ent"
+    version   = "latest"
   }
-
-  # Use source_image_id when restoring from existing disk (via snapshot converted to image)
-  source_image_id = var.existing_os_disk_id
 
   lifecycle {
     precondition {
@@ -177,7 +212,7 @@ resource "azurerm_windows_virtual_machine" "vm" {
 resource "azurerm_virtual_machine_extension" "enable_hyperv" {
   count                      = var.enable_hyperv ? 1 : 0
   name                       = "EnableHyperV"
-  virtual_machine_id         = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id         = local.vm_id
   publisher                  = "Microsoft.Compute"
   type                       = "CustomScriptExtension"
   type_handler_version       = "1.10"
@@ -205,13 +240,13 @@ resource "azurerm_virtual_machine_extension" "enable_hyperv" {
     EOT
   })
   tags       = var.tags
-  depends_on = [azurerm_windows_virtual_machine.vm]
+  depends_on = [azurerm_virtual_machine.vm, azurerm_windows_virtual_machine.vm]
 }
 
 # Post-verify Hyper-V (after reboot) by writing verification output; typically run via a second extension pass.
 resource "azurerm_virtual_machine_extension" "aad_login" {
   name                        = "AADLoginForWindows"
-  virtual_machine_id          = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id          = local.vm_id
   publisher                   = "Microsoft.Azure.ActiveDirectory"
   type                        = "AADLoginForWindows"
   type_handler_version        = "2.0"
@@ -223,7 +258,7 @@ resource "azurerm_virtual_machine_extension" "aad_login" {
 
 resource "azurerm_virtual_machine_extension" "dsc" {
   name                        = "DSC"
-  virtual_machine_id          = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id          = local.vm_id
   publisher                   = "Microsoft.Powershell"
   type                        = "DSC"
   type_handler_version        = "2.73"
@@ -250,7 +285,7 @@ resource "azurerm_virtual_machine_extension" "dsc" {
 
 resource "azurerm_virtual_machine_extension" "guest_attestation" {
   name                        = "GuestAttestation"
-  virtual_machine_id          = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id          = local.vm_id
   publisher                   = "Microsoft.Azure.Security.WindowsAttestation"
   type                        = "GuestAttestation"
   type_handler_version        = "1.0"
@@ -312,7 +347,7 @@ resource "azurerm_virtual_desktop_workspace_application_group_association" "work
 }
 resource "azurerm_dev_test_global_vm_shutdown_schedule" "auto_shutdown" {
   location              = var.location
-  virtual_machine_id    = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id    = local.vm_id
   daily_recurrence_time = "0300"
   timezone              = "Pacific Standard Time"
   enabled               = true
