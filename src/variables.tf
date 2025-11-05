@@ -52,10 +52,10 @@ variable "tags" {
 variable "rdp_allowed_source_ips" {
   description = "List of public IPv4 addresses (without CIDR) allowed inbound RDP (3389). Leave empty to block unless other rules exist."
   type        = map(string)
-  default     = {
-    "home" = "98.51.6.0/24"
+  default = {
+    "home"    = "98.51.6.0/24"
     "commute" = "192.168.0.0/24"
-    "Atilla" = "174.166.27.0/24"
+    "Atilla"  = "174.166.27.0/24"
   }
 }
 

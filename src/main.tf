@@ -7,19 +7,19 @@ data "http" "my_ip" {
 }
 
 locals {
-  rg_name        = "${var.name_prefix}-rg"
-  vnet_name      = "${var.name_prefix}-vnet"
-  subnet_name    = "${var.name_prefix}-subnet"
-  nsg_name       = "${var.name_prefix}-nsg"
-  nic_name       = "${var.name_prefix}-nic"
-  pip_name       = "${var.name_prefix}-pip"
-  kv_name        = replace(lower("${var.name_prefix}kv"), "_", "")
-  vm_name        = "${var.name_prefix}-vm"
-  osdisk_name    = "${var.name_prefix}-osdisk"
-  password_secret_name = "${var.name_prefix}-vm-admin-password"
-  avd_host_pool_name  = "${var.name_prefix}-hostpool"
-  avd_workspace_name  = "${var.name_prefix}-workspace"
-  avd_app_group_name  = "${var.name_prefix}-appgroup"
+  rg_name                = "${var.name_prefix}-rg"
+  vnet_name              = "${var.name_prefix}-vnet"
+  subnet_name            = "${var.name_prefix}-subnet"
+  nsg_name               = "${var.name_prefix}-nsg"
+  nic_name               = "${var.name_prefix}-nic"
+  pip_name               = "${var.name_prefix}-pip"
+  kv_name                = replace(lower("${var.name_prefix}kv"), "_", "")
+  vm_name                = "${var.name_prefix}-vm"
+  osdisk_name            = "${var.name_prefix}-osdisk"
+  password_secret_name   = "${var.name_prefix}-vm-admin-password"
+  avd_host_pool_name     = "${var.name_prefix}-hostpool"
+  avd_workspace_name     = "${var.name_prefix}-workspace"
+  avd_app_group_name     = "${var.name_prefix}-appgroup"
   hyperv_supported_size  = contains(var.allowed_vm_sizes, var.vm_size)
   hyperv_supported_image = (lower(azurerm_windows_virtual_machine.vm.source_image_reference[0].publisher) == "microsoftwindowsdesktop")
 }
@@ -38,17 +38,17 @@ data "bitwarden-secrets_secret" "vm_login" {
 
 # TODO: Cleanup: Remove random password generation if Bitwarden secret is used.
 resource "azurerm_key_vault" "kv" {
-    name                        = local.kv_name
-    location                    = var.location
-    resource_group_name         = azurerm_resource_group.rg.name
-    tenant_id                   = data.azurerm_client_config.current.tenant_id
-    sku_name                    = "standard"
-    purge_protection_enabled    = false
-    soft_delete_retention_days  = 7
-    public_network_access_enabled = true
-    enabled_for_disk_encryption = true
-    rbac_authorization_enabled   = true
-    tags                        = var.tags
+  name                          = local.kv_name
+  location                      = var.location
+  resource_group_name           = azurerm_resource_group.rg.name
+  tenant_id                     = data.azurerm_client_config.current.tenant_id
+  sku_name                      = "standard"
+  purge_protection_enabled      = false
+  soft_delete_retention_days    = 7
+  public_network_access_enabled = true
+  enabled_for_disk_encryption   = true
+  rbac_authorization_enabled    = true
+  tags                          = var.tags
 }
 
 resource "azurerm_key_vault_secret" "vm_admin_password" {
@@ -79,28 +79,28 @@ resource "azurerm_network_security_group" "nsg" {
   tags                = var.tags
 
   # Create one RDP allow rule per effective source IP. No open wildcard rule is created.
-dynamic "security_rule" {
+  dynamic "security_rule" {
     # local.effective_rdp_ips expected as a map(string) of name => cidr (e.g. { home = "98.51.6.220/24", commute = "192.168.0.2/24" })
     # Create deterministic ordering by sorting keys, then assign priorities 100,110,120,...
     for_each = {
-        for idx, k in sort(keys(var.rdp_allowed_source_ips)) :
-        k => {
-            cidr     = var.rdp_allowed_source_ips[k]
-            priority = 100 + idx * 10
-        }
+      for idx, k in sort(keys(var.rdp_allowed_source_ips)) :
+      k => {
+        cidr     = var.rdp_allowed_source_ips[k]
+        priority = 100 + idx * 10
+      }
     }
     content {
-        name                       = "rdp-${security_rule.key}"
-        priority                   = security_rule.value.priority
-        direction                  = "Inbound"
-        access                     = "Allow"
-        protocol                   = "Tcp"
-        source_port_range          = "*"
-        destination_port_range     = "3389"
-        source_address_prefix      = security_rule.value.cidr
-        destination_address_prefix = "*"
+      name                       = "rdp-${security_rule.key}"
+      priority                   = security_rule.value.priority
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = "3389"
+      source_address_prefix      = security_rule.value.cidr
+      destination_address_prefix = "*"
     }
-}
+  }
 }
 
 resource "azurerm_subnet_network_security_group_association" "subnet_assoc" {
@@ -132,14 +132,14 @@ resource "azurerm_network_interface" "nic" {
 }
 
 resource "azurerm_windows_virtual_machine" "vm" {
-  name                = local.vm_name
-  location            = var.location
-  resource_group_name = azurerm_resource_group.rg.name
-  size                = var.vm_size
-  admin_username      = var.vm_admin_username
-  admin_password      = azurerm_key_vault_secret.vm_admin_password.value
+  name                  = local.vm_name
+  location              = var.location
+  resource_group_name   = azurerm_resource_group.rg.name
+  size                  = var.vm_size
+  admin_username        = var.vm_admin_username
+  admin_password        = azurerm_key_vault_secret.vm_admin_password.value
   network_interface_ids = [azurerm_network_interface.nic.id]
-  tags                = var.tags
+  tags                  = var.tags
 
   identity { type = "SystemAssigned" }
 
@@ -203,7 +203,7 @@ resource "azurerm_virtual_machine_extension" "enable_hyperv" {
         Restart-Computer -Force;"
     EOT
   })
-  tags = var.tags
+  tags       = var.tags
   depends_on = [azurerm_windows_virtual_machine.vm]
 }
 
@@ -260,12 +260,12 @@ resource "azurerm_virtual_machine_extension" "guest_attestation" {
   tags                        = var.tags
 }
 resource "azurerm_virtual_desktop_host_pool" "host_pool" {
-  name                  = local.avd_host_pool_name
-  resource_group_name   = azurerm_resource_group.rg.name
-  location              = var.location
-  friendly_name         = "${var.name_prefix}-hostpool"
-  description           = "Host Pool for ${var.name_prefix} environment"
-  type                  = "Pooled"
+  name                     = local.avd_host_pool_name
+  resource_group_name      = azurerm_resource_group.rg.name
+  location                 = var.location
+  friendly_name            = "${var.name_prefix}-hostpool"
+  description              = "Host Pool for ${var.name_prefix} environment"
+  type                     = "Pooled"
   load_balancer_type       = "BreadthFirst"
   maximum_sessions_allowed = var.avd_max_sessions
   preferred_app_group_type = "Desktop"
@@ -273,14 +273,14 @@ resource "azurerm_virtual_desktop_host_pool" "host_pool" {
   public_network_access    = "Enabled"
   validate_environment     = false
   custom_rdp_properties    = var.avd_custom_rdp_properties
-  tags = var.tags
+  tags                     = var.tags
 }
 
 # AVD host pool registration info (token) used by DSC extension to add the session host.
 # Token expires after 24h; a new apply refreshes it and may update the extension if changed.
 resource "azurerm_virtual_desktop_host_pool_registration_info" "reg" {
-  hostpool_id      = azurerm_virtual_desktop_host_pool.host_pool.id
-  expiration_date  = timeadd(timestamp(), "72h")
+  hostpool_id     = azurerm_virtual_desktop_host_pool.host_pool.id
+  expiration_date = timeadd(timestamp(), "72h")
 }
 
 resource "azurerm_virtual_desktop_workspace" "workspace" {
@@ -294,14 +294,14 @@ resource "azurerm_virtual_desktop_workspace" "workspace" {
 }
 
 resource "azurerm_virtual_desktop_application_group" "app_group" {
-  name                = local.avd_app_group_name
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = var.location
-  friendly_name       = "${var.name_prefix}-apps"
-  description         = "Default desktop app group for ${var.name_prefix}"
-  type                = "Desktop"
-  host_pool_id        = azurerm_virtual_desktop_host_pool.host_pool.id
-  tags                = var.tags
+  name                         = local.avd_app_group_name
+  resource_group_name          = azurerm_resource_group.rg.name
+  location                     = var.location
+  friendly_name                = "${var.name_prefix}-apps"
+  description                  = "Default desktop app group for ${var.name_prefix}"
+  type                         = "Desktop"
+  host_pool_id                 = azurerm_virtual_desktop_host_pool.host_pool.id
+  tags                         = var.tags
   default_desktop_display_name = "SessionDesktop"
 }
 

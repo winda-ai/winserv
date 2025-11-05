@@ -23,7 +23,7 @@ output "key_vault_name" {
 }
 
 output "key_vault_secret_name" {
-  value = azurerm_key_vault_secret.vm_admin_password.name
+  value     = azurerm_key_vault_secret.vm_admin_password.name
   sensitive = false
 }
 

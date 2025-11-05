@@ -9,7 +9,7 @@ terraform {
       version = "~> 3.4"
     }
     bitwarden-secrets = {
-      source = "bitwarden/bitwarden-secrets"
+      source  = "bitwarden/bitwarden-secrets"
       version = "~> 0.5"
     }
   }
@@ -22,7 +22,7 @@ provider "azurerm" {
       recover_soft_deleted_key_vaults = true
     }
     resource_group {
-        prevent_deletion_if_contains_resources = false
+      prevent_deletion_if_contains_resources = false
     }
   }
   # Authentication handled via Azure CLI locally (user) or ARM_* env vars (OIDC in CI).
@@ -32,8 +32,8 @@ provider "azurerm" {
 provider "http" {}
 
 provider "bitwarden-secrets" {
-  api_url         = "https://vault.bitwarden.com/api"
-  identity_url    = "https://vault.bitwarden.com/identity"
+  api_url      = "https://vault.bitwarden.com/api"
+  identity_url = "https://vault.bitwarden.com/identity"
   # access_token    = "${var.bitwarden_access_token}" # BW_ACCESS_TOKEN env var used automatically
   organization_id = "85e9ba59-b2af-45c6-9fee-b34500846195"
 }
