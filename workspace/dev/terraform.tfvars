@@ -8,3 +8,4 @@ tags = {
 	env     = "dev"
 	project = "winda"
 }
+existing_os_disk_id = "/subscriptions/35c779b2-b36f-40ca-9ee5-d434a15742ef/resourceGroups/WINDA-ASSETS/providers/Microsoft.Compute/disks/winda-dev-win10-smartcorr"
