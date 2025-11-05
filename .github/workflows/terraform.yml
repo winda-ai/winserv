@@ -127,7 +127,18 @@ jobs:
       - name: Post Run Summary
         if: always()
         run: |
-          echo "Action: ${{ github.event.inputs.action }}" >> $GITHUB_STEP_SUMMARY
-          echo "Environment: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "Backend: ${{ steps.backend.outputs.backend_path }}" >> $GITHUB_STEP_SUMMARY
-          if [ -f src/tfplan ]; then echo "Plan artifact: src/tfplan" >> $GITHUB_STEP_SUMMARY; fi
+          if [ -f src/tfplan ]; then 
+            echo "📦 **Plan artifact:** src/tfplan" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Display Terraform outputs from outputs.txt (after apply/plan, not destroy)
+          if [ -f outputs.txt ]; then
+            echo "## 📊 Terraform Outputs" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat outputs.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+          fi

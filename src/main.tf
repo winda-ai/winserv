@@ -110,6 +110,7 @@ resource "azurerm_subnet_network_security_group_association" "subnet_assoc" {
 
 resource "azurerm_public_ip" "pip" {
   name                = local.pip_name
+  domain_name_label   = var.name_prefix
   location            = var.location
   resource_group_name = azurerm_resource_group.rg.name
   allocation_method   = "Static"
