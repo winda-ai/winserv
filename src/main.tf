@@ -459,15 +459,11 @@ resource "azurerm_dev_test_global_vm_shutdown_schedule" "auto_shutdown" {
   }
 }
 
-locals {
-  vm_id = azurerm_windows_virtual_machine.vm.id
-}
-
 resource "null_resource" "snapshot_on_destroy" {
   count = var.auto_snapshot_on_destroy ? 1 : 0
 
   triggers = {
-    vm_id           = azurerm_windows_virtual_machine.vm.id
+    vm_id           = local.vm_id
     snapshot_rg     = local.snapshot_rg
     snapshot_name   = local.snapshot_name
     os_disk_name    = local.osdisk_name
