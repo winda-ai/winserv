@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - dev
+          - dev2
       action:
         description: "Terraform action to perform"
         required: true
