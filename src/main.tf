@@ -31,6 +31,18 @@ locals {
   
   # Abstract VM ID to handle both resource types
   vm_id = var.existing_os_disk_id != null ? azurerm_virtual_machine.vm[0].id : azurerm_windows_virtual_machine.vm[0].id
+
+  snapshot_rg = var.snapshot_resource_group != null ? var.snapshot_resource_group : azurerm_resource_group.rg.name
+  snapshot_name = "${var.name_prefix}-snapshot-${formatdate("YYYYMMDDhhmmss", timestamp())}"
+  
+  # Get the actual OS disk ID based on which VM resource is being used
+  os_disk_id = (
+    var.existing_os_disk_id != null 
+    ? data.azurerm_managed_disk.existing_disk[0].id 
+    : one(azurerm_windows_virtual_machine.vm[*].id) != null 
+      ? "${one(azurerm_windows_virtual_machine.vm[*].id)}/osDisk/${local.osdisk_name}"
+      : null
+  )
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -141,7 +153,47 @@ resource "azurerm_network_interface" "nic" {
   }
 }
 
-# VM resource - handles both new image creation and existing disk attachment
+# Data source to read the OS disk from the running VM (for snapshot creation)
+data "azurerm_managed_disk" "current_os_disk" {
+  count = var.auto_snapshot_on_destroy && var.existing_os_disk_id == null ? 1 : 0
+  
+  name                = local.osdisk_name
+  resource_group_name = azurerm_resource_group.rg.name
+  
+  depends_on = [
+    azurerm_windows_virtual_machine.vm
+  ]
+}
+
+# Create snapshot of OS disk before destroy
+resource "azurerm_snapshot" "pre_destroy_snapshot" {
+  count = var.auto_snapshot_on_destroy ? 1 : 0
+  
+  name                = local.snapshot_name
+  resource_group_name = local.snapshot_rg
+  location            = var.location
+  
+  create_option = "Copy"
+  source_uri    = var.existing_os_disk_id != null ? data.azurerm_managed_disk.existing_disk[0].id : data.azurerm_managed_disk.current_os_disk[0].id
+  
+  tags = merge(var.tags, {
+    created_by     = "terraform"
+    environment    = var.name_prefix
+    auto_snapshot  = "true"
+    created_at     = formatdate("YYYY-MM-DD'T'hh:mm:ssZ", timestamp())
+    source_vm      = local.vm_name
+  })
+  
+  lifecycle {
+    # Create snapshot before destroying VM
+    create_before_destroy = true
+    
+    # Ignore timestamp changes to avoid recreation on every apply
+    ignore_changes = [name, tags["created_at"]]
+  }
+}
+
+# VM resource - handles existing disk attachment
 resource "azurerm_virtual_machine" "vm" {
   count               = var.existing_os_disk_id != null ? 1 : 0
   name                = local.vm_name
@@ -171,6 +223,9 @@ resource "azurerm_virtual_machine" "vm" {
       error_message = "Hyper-V enabled but VM size ${var.vm_size} not in allowed_vm_sizes list for nested virtualization."
     }
   }
+  
+  # Ensure snapshot exists before allowing VM destruction
+  depends_on = [azurerm_snapshot.pre_destroy_snapshot]
 }
 
 # New VM resource for marketplace image (when no existing disk)
@@ -206,6 +261,9 @@ resource "azurerm_windows_virtual_machine" "vm" {
       error_message = "Hyper-V enabled but VM size ${var.vm_size} not in allowed_vm_sizes list for nested virtualization."
     }
   }
+  
+  # Ensure snapshot exists before allowing VM destruction
+  depends_on = [azurerm_snapshot.pre_destroy_snapshot]
 }
 
 # Enable Hyper-V (nested virtualization) inside the VM when requested.

@@ -106,3 +106,15 @@ variable "existing_os_disk_id" {
   type        = string
   default     = null
 }
+
+variable "auto_snapshot_on_destroy" {
+  description = "Automatically create disk snapshot before VM destruction"
+  type        = bool
+  default     = true
+}
+
+variable "snapshot_resource_group" {
+  description = "Resource group to store snapshots (defaults to main RG if not set)"
+  type        = string
+  default     = null
+}

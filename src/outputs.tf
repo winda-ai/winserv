@@ -54,3 +54,18 @@ output "connection_summary" {
     application_group_id   = azurerm_virtual_desktop_application_group.app_group.id
   }
 }
+
+output "auto_snapshot_info" {
+  description = "Information about the most recent auto-created snapshot"
+  value = var.auto_snapshot_on_destroy ? {
+    enabled          = true
+    snapshot_id      = try(azurerm_snapshot.pre_destroy_snapshot[0].id, null)
+    snapshot_name    = try(azurerm_snapshot.pre_destroy_snapshot[0].name, null)
+    snapshot_rg      = local.snapshot_rg
+    created_at       = try(azurerm_snapshot.pre_destroy_snapshot[0].tags["created_at"], null)
+    restore_command  = try("Update terraform.tfvars: existing_os_disk_id = \"${azurerm_snapshot.pre_destroy_snapshot[0].id}\"", "N/A")
+    list_command     = "az snapshot list --resource-group ${local.snapshot_rg} --query \"[?tags.auto_snapshot=='true' && tags.environment=='${var.name_prefix}'].{name:name,created:tags.created_at}\" -o table"
+  } : {
+    enabled = false
+  }
+}
