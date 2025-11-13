@@ -6,13 +6,6 @@ data "http" "my_ip" {
   url = "https://api.ipify.org?format=text"
 }
 
-# Reference existing disk if provided (to create snapshot from it)
-data "azurerm_managed_disk" "existing_disk" {
-  count               = var.existing_os_disk_id != null ? 1 : 0
-  name                = split("/", var.existing_os_disk_id)[8]
-  resource_group_name = split("/", var.existing_os_disk_id)[4]
-}
-
 locals {
   rg_name              = "${var.name_prefix}-rg"
   vnet_name            = "${var.name_prefix}-vnet"
@@ -34,15 +27,58 @@ locals {
 
   snapshot_rg = var.snapshot_resource_group != null ? var.snapshot_resource_group : azurerm_resource_group.rg.name
   snapshot_name = "${var.name_prefix}-snapshot-${formatdate("YYYYMMDDhhmmss", timestamp())}"
-  
-  # Get the actual OS disk ID based on which VM resource is being used
-  os_disk_id = (
-    var.existing_os_disk_id != null 
-    ? data.azurerm_managed_disk.existing_disk[0].id 
-    : one(azurerm_windows_virtual_machine.vm[*].id) != null 
-      ? "${one(azurerm_windows_virtual_machine.vm[*].id)}/osDisk/${local.osdisk_name}"
-      : null
-  )
+}
+
+# Data source to read existing snapshot (if provided)
+data "azurerm_snapshot" "existing_snapshot" {
+  count               = var.existing_os_disk_id != null && can(regex("/snapshots/", var.existing_os_disk_id)) ? 1 : 0
+  name                = split("/", var.existing_os_disk_id)[8]
+  resource_group_name = split("/", var.existing_os_disk_id)[4]
+}
+
+# Data source to read existing disk (if provided as disk ID)
+data "azurerm_managed_disk" "existing_disk" {
+  count               = var.existing_os_disk_id != null && can(regex("/disks/", var.existing_os_disk_id)) ? 1 : 0
+  name                = split("/", var.existing_os_disk_id)[8]
+  resource_group_name = split("/", var.existing_os_disk_id)[4]
+}
+
+# Create Azure Image from existing snapshot (if snapshot provided)
+resource "azurerm_image" "from_snapshot" {
+  count               = var.existing_os_disk_id != null && can(regex("/snapshots/", var.existing_os_disk_id)) ? 1 : 0
+  name                = "${var.name_prefix}-image-from-snapshot"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  os_disk {
+    os_type  = "Windows"
+    os_state = "Generalized"
+    snapshot = data.azurerm_snapshot.existing_snapshot[0].id
+    caching  = "ReadWrite"
+  }
+
+  tags = merge(var.tags, {
+    source_snapshot = data.azurerm_snapshot.existing_snapshot[0].name
+  })
+}
+
+# Create Azure Image from existing disk (if disk provided)
+resource "azurerm_image" "from_disk" {
+  count               = var.existing_os_disk_id != null && can(regex("/disks/", var.existing_os_disk_id)) ? 1 : 0
+  name                = "${var.name_prefix}-image-from-disk"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  os_disk {
+    os_type         = "Windows"
+    os_state        = "Generalized"
+    managed_disk_id = data.azurerm_managed_disk.existing_disk[0].id
+    caching         = "ReadWrite"
+  }
+
+  tags = merge(var.tags, {
+    source_disk = data.azurerm_managed_disk.existing_disk[0].name
+  })
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -248,11 +284,20 @@ resource "azurerm_windows_virtual_machine" "vm" {
     storage_account_type = "Premium_LRS"
   }
 
-  source_image_reference {
-    publisher = "MicrosoftWindowsDesktop"
-    offer     = "windows-10"
-    sku       = "win10-22h2-ent"
-    version   = "latest"
+  # Use existing image if provided, otherwise marketplace image
+  source_image_id = var.existing_os_disk_id != null ? (
+    can(regex("/snapshots/", var.existing_os_disk_id)) ? azurerm_image.from_snapshot[0].id : azurerm_image.from_disk[0].id
+  ) : null
+
+  # Marketplace image reference (only when no existing disk)
+  dynamic "source_image_reference" {
+    for_each = var.existing_os_disk_id == null ? [1] : []
+    content {
+      publisher = "MicrosoftWindowsDesktop"
+      offer     = "windows-10"
+      sku       = "win10-22h2-ent"
+      version   = "latest"
+    }
   }
 
   lifecycle {
@@ -261,9 +306,6 @@ resource "azurerm_windows_virtual_machine" "vm" {
       error_message = "Hyper-V enabled but VM size ${var.vm_size} not in allowed_vm_sizes list for nested virtualization."
     }
   }
-  
-  # Ensure snapshot exists before allowing VM destruction
-  depends_on = [azurerm_snapshot.pre_destroy_snapshot]
 }
 
 # Enable Hyper-V (nested virtualization) inside the VM when requested.
@@ -415,4 +457,47 @@ resource "azurerm_dev_test_global_vm_shutdown_schedule" "auto_shutdown" {
     email           = "" # Set via variable if needed later
     time_in_minutes = 30
   }
+}
+
+locals {
+  vm_id = azurerm_windows_virtual_machine.vm.id
+}
+
+resource "null_resource" "snapshot_on_destroy" {
+  count = var.auto_snapshot_on_destroy ? 1 : 0
+
+  triggers = {
+    vm_id           = azurerm_windows_virtual_machine.vm.id
+    snapshot_rg     = local.snapshot_rg
+    snapshot_name   = local.snapshot_name
+    os_disk_name    = local.osdisk_name
+    resource_group  = azurerm_resource_group.rg.name
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      echo "🔄 Creating snapshot before VM destruction..."
+      
+      # Get OS disk ID from the VM being destroyed
+      DISK_ID=$(az disk show \
+        --resource-group "${self.triggers.resource_group}" \
+        --name "${self.triggers.os_disk_name}" \
+        --query "id" -o tsv 2>/dev/null || echo "")
+      
+      if [ -n "$DISK_ID" ]; then
+        az snapshot create \
+          --resource-group "${self.triggers.snapshot_rg}" \
+          --name "${self.triggers.snapshot_name}" \
+          --source "$DISK_ID" \
+          --tags created_by=terraform environment=${self.triggers.resource_group} auto_snapshot=true \
+          && echo "✅ Snapshot created: ${self.triggers.snapshot_name}" \
+          || echo "⚠️  Snapshot creation failed (disk may already be deleted)"
+      else
+        echo "⚠️  OS disk not found - snapshot skipped"
+      fi
+    EOT
+  }
+
+  depends_on = [azurerm_windows_virtual_machine.vm]
 }
