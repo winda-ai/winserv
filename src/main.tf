@@ -7,21 +7,19 @@ data "http" "my_ip" {
 }
 
 locals {
-  rg_name                = "${var.name_prefix}-rg"
-  vnet_name              = "${var.name_prefix}-vnet"
-  subnet_name            = "${var.name_prefix}-subnet"
-  nsg_name               = "${var.name_prefix}-nsg"
-  nic_name               = "${var.name_prefix}-nic"
-  pip_name               = "${var.name_prefix}-pip"
-  kv_name                = replace(lower("${var.name_prefix}kv"), "_", "")
-  vm_name                = "${var.name_prefix}-vm"
-  osdisk_name            = "${var.name_prefix}-osdisk"
-  password_secret_name   = "${var.name_prefix}-vm-admin-password"
-  avd_host_pool_name     = "${var.name_prefix}-hostpool"
-  avd_workspace_name     = "${var.name_prefix}-workspace"
-  avd_app_group_name     = "${var.name_prefix}-appgroup"
-  hyperv_supported_size  = contains(var.allowed_vm_sizes, var.vm_size)
-  hyperv_supported_image = (lower(azurerm_windows_virtual_machine.vm.source_image_reference[0].publisher) == "microsoftwindowsdesktop")
+  rg_name              = "${var.name_prefix}-rg"
+  vnet_name            = "${var.name_prefix}-vnet"
+  subnet_name          = "${var.name_prefix}-subnet"
+  nsg_name             = "${var.name_prefix}-nsg"
+  nic_name             = "${var.name_prefix}-nic"
+  pip_name             = "${var.name_prefix}-pip"
+  kv_name              = replace(lower("${var.name_prefix}kv"), "_", "")
+  vm_name              = "${var.name_prefix}-vm"
+  osdisk_name          = "${var.name_prefix}-osdisk"
+  password_secret_name = "${var.name_prefix}-vm-admin-password"
+  avd_host_pool_name   = "${var.name_prefix}-hostpool"
+  avd_workspace_name   = "${var.name_prefix}-workspace"
+  avd_app_group_name   = "${var.name_prefix}-appgroup"
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -38,6 +36,7 @@ data "bitwarden-secrets_secret" "vm_login" {
 
 # TODO: Cleanup: Remove random password generation if Bitwarden secret is used.
 resource "azurerm_key_vault" "kv" {
+  count = var.create_brand_new ? 1 : 0
   name                          = local.kv_name
   location                      = var.location
   resource_group_name           = azurerm_resource_group.rg.name
@@ -52,9 +51,10 @@ resource "azurerm_key_vault" "kv" {
 }
 
 resource "azurerm_key_vault_secret" "vm_admin_password" {
+  count = var.create_brand_new ? 1 : 0
   name         = local.password_secret_name
   value        = data.bitwarden-secrets_secret.vm_login.value
-  key_vault_id = azurerm_key_vault.kv.id
+  key_vault_id = azurerm_key_vault.kv[0].id
 }
 
 resource "azurerm_virtual_network" "vnet" {
@@ -109,6 +109,7 @@ resource "azurerm_subnet_network_security_group_association" "subnet_assoc" {
 }
 
 resource "azurerm_public_ip" "pip" {
+  count = var.create_brand_new ? 1 : 0
   name                = local.pip_name
   domain_name_label   = var.name_prefix
   location            = var.location
@@ -119,6 +120,7 @@ resource "azurerm_public_ip" "pip" {
 }
 
 resource "azurerm_network_interface" "nic" {
+  count = var.create_brand_new ? 1 : 0
   name                = local.nic_name
   location            = var.location
   resource_group_name = azurerm_resource_group.rg.name
@@ -128,18 +130,19 @@ resource "azurerm_network_interface" "nic" {
     name                          = "primary"
     subnet_id                     = azurerm_subnet.subnet.id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = azurerm_public_ip.pip.id
+    public_ip_address_id          = azurerm_public_ip.pip[0].id
   }
 }
 
 resource "azurerm_windows_virtual_machine" "vm" {
+  count                 = var.create_brand_new ? 1 : 0
   name                  = local.vm_name
   location              = var.location
   resource_group_name   = azurerm_resource_group.rg.name
   size                  = var.vm_size
   admin_username        = var.vm_admin_username
-  admin_password        = azurerm_key_vault_secret.vm_admin_password.value
-  network_interface_ids = [azurerm_network_interface.nic.id]
+  admin_password        = azurerm_key_vault_secret.vm_admin_password[0].value
+  network_interface_ids = [azurerm_network_interface.nic[0].id]
   tags                  = var.tags
 
   identity { type = "SystemAssigned" }
@@ -152,19 +155,13 @@ resource "azurerm_windows_virtual_machine" "vm" {
 
   # When existing_os_disk_id is provided, create VM from that disk's snapshot/image
   # Otherwise use marketplace image
-  dynamic "source_image_reference" {
-    for_each = var.existing_os_disk_id == null ? [1] : []
-    content {
-      publisher = "MicrosoftWindowsDesktop"
-      offer     = "windows-10"
-      sku       = "win10-22h2-ent"
-      version   = "latest"
-    }
+  source_image_reference {
+    publisher = "MicrosoftWindowsDesktop"
+    offer     = "windows-10"
+    sku       = "win10-22h2-ent"
+    version   = "latest"
   }
-
-  # Use source_image_id when restoring from existing disk (via snapshot converted to image)
-  source_image_id = var.existing_os_disk_id
-
+  
   lifecycle {
     precondition {
       condition     = var.enable_hyperv ? contains(var.allowed_vm_sizes, var.vm_size) : true
@@ -175,9 +172,9 @@ resource "azurerm_windows_virtual_machine" "vm" {
 
 # Enable Hyper-V (nested virtualization) inside the VM when requested.
 resource "azurerm_virtual_machine_extension" "enable_hyperv" {
-  count                      = var.enable_hyperv ? 1 : 0
+  count                      = var.create_brand_new && var.enable_hyperv ? 1 : 0
   name                       = "EnableHyperV"
-  virtual_machine_id         = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id         = azurerm_windows_virtual_machine.vm[0].id
   publisher                  = "Microsoft.Compute"
   type                       = "CustomScriptExtension"
   type_handler_version       = "1.10"
@@ -210,8 +207,9 @@ resource "azurerm_virtual_machine_extension" "enable_hyperv" {
 
 # Post-verify Hyper-V (after reboot) by writing verification output; typically run via a second extension pass.
 resource "azurerm_virtual_machine_extension" "aad_login" {
+  count                       = var.create_brand_new ? 1 : 0
   name                        = "AADLoginForWindows"
-  virtual_machine_id          = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id          = azurerm_windows_virtual_machine.vm[0].id
   publisher                   = "Microsoft.Azure.ActiveDirectory"
   type                        = "AADLoginForWindows"
   type_handler_version        = "2.0"
@@ -222,8 +220,9 @@ resource "azurerm_virtual_machine_extension" "aad_login" {
 }
 
 resource "azurerm_virtual_machine_extension" "dsc" {
+  count                       = var.create_brand_new ? 1 : 0
   name                        = "DSC"
-  virtual_machine_id          = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id          = azurerm_windows_virtual_machine.vm[0].id
   publisher                   = "Microsoft.Powershell"
   type                        = "DSC"
   type_handler_version        = "2.73"
@@ -236,21 +235,22 @@ resource "azurerm_virtual_machine_extension" "dsc" {
     properties = {
       UseAgentDownloadEndpoint = true
       aadJoin                  = true
-      hostPoolName             = azurerm_virtual_desktop_host_pool.host_pool.name
+      hostPoolName             = azurerm_virtual_desktop_host_pool.host_pool[0].name
     }
   })
   # Provide the AVD registration token as protected settings so it is not stored in plain state output.
   protected_settings = jsonencode({
     properties = {
-      registrationInfoToken = azurerm_virtual_desktop_host_pool_registration_info.reg.token
+      registrationInfoToken = azurerm_virtual_desktop_host_pool_registration_info.reg[0].token
     }
   })
   tags = var.tags
 }
 
 resource "azurerm_virtual_machine_extension" "guest_attestation" {
+  count = var.create_brand_new ? 1 : 0
   name                        = "GuestAttestation"
-  virtual_machine_id          = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id          = azurerm_windows_virtual_machine.vm[0].id
   publisher                   = "Microsoft.Azure.Security.WindowsAttestation"
   type                        = "GuestAttestation"
   type_handler_version        = "1.0"
@@ -261,6 +261,7 @@ resource "azurerm_virtual_machine_extension" "guest_attestation" {
   tags                        = var.tags
 }
 resource "azurerm_virtual_desktop_host_pool" "host_pool" {
+  count = var.create_brand_new ? 1 : 0
   name                     = local.avd_host_pool_name
   resource_group_name      = azurerm_resource_group.rg.name
   location                 = var.location
@@ -280,11 +281,13 @@ resource "azurerm_virtual_desktop_host_pool" "host_pool" {
 # AVD host pool registration info (token) used by DSC extension to add the session host.
 # Token expires after 24h; a new apply refreshes it and may update the extension if changed.
 resource "azurerm_virtual_desktop_host_pool_registration_info" "reg" {
-  hostpool_id     = azurerm_virtual_desktop_host_pool.host_pool.id
+  count = var.create_brand_new ? 1 :0
+  hostpool_id     = azurerm_virtual_desktop_host_pool.host_pool[0].id
   expiration_date = timeadd(timestamp(), "72h")
 }
 
 resource "azurerm_virtual_desktop_workspace" "workspace" {
+  count = var.create_brand_new ? 1 : 0
   name                          = local.avd_workspace_name
   resource_group_name           = azurerm_resource_group.rg.name
   location                      = var.location
@@ -295,24 +298,27 @@ resource "azurerm_virtual_desktop_workspace" "workspace" {
 }
 
 resource "azurerm_virtual_desktop_application_group" "app_group" {
+  count = var.create_brand_new ? 1 : 0
   name                         = local.avd_app_group_name
   resource_group_name          = azurerm_resource_group.rg.name
   location                     = var.location
   friendly_name                = "${var.name_prefix}-apps"
   description                  = "Default desktop app group for ${var.name_prefix}"
   type                         = "Desktop"
-  host_pool_id                 = azurerm_virtual_desktop_host_pool.host_pool.id
+  host_pool_id                 = azurerm_virtual_desktop_host_pool.host_pool[0].id
   tags                         = var.tags
   default_desktop_display_name = "SessionDesktop"
 }
 
 resource "azurerm_virtual_desktop_workspace_application_group_association" "workspace_assoc" {
-  workspace_id         = azurerm_virtual_desktop_workspace.workspace.id
-  application_group_id = azurerm_virtual_desktop_application_group.app_group.id
+  count = var.create_brand_new ? 1 : 0
+  workspace_id         = azurerm_virtual_desktop_workspace.workspace[0].id
+  application_group_id = azurerm_virtual_desktop_application_group.app_group[0].id
 }
 resource "azurerm_dev_test_global_vm_shutdown_schedule" "auto_shutdown" {
+  count                 = var.create_brand_new ? 1 : 0
   location              = var.location
-  virtual_machine_id    = azurerm_windows_virtual_machine.vm.id
+  virtual_machine_id    = azurerm_windows_virtual_machine.vm[0].id
   daily_recurrence_time = "0300"
   timezone              = "Pacific Standard Time"
   enabled               = true

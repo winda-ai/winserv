@@ -101,8 +101,26 @@ variable "avd_start_vm_on_connect" {
   default     = true
 }
 
-variable "existing_os_disk_id" {
+variable "create_brand_new" {
+  description = "Create a new AVD"
+  type = bool
+  default = false
+}
+
+variable "existing_disk_snapshot_id" {
   description = "Resource ID of an Azure Image or Snapshot to restore the VM from (preserves installed apps and state). Provide the full resource ID of either: 1) an Azure Managed Image created from a VM, or 2) a Snapshot of an OS disk. Leave null to create a fresh VM from marketplace image."
   type        = string
   default     = null
+}
+
+variable "create_new_vm_from_snapshot" {
+  description = "Create a new VM in a separate resource group from an existing snapshot. Requires existing_os_disk_id to be set to a snapshot ID."
+  type        = bool
+  default     = false
+}
+
+variable "new_vm_name_suffix" {
+  description = "Suffix to append to the new VM name (e.g., 'clone', 'test'). The full name will be {name_prefix}-{suffix}-vm"
+  type        = string
+  default     = "new"
 }

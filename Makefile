@@ -47,7 +47,10 @@ plan-save:
 apply:
 	terraform -chdir=$(TF_DIR) apply -auto-approve -var-file=$(VARS_FILE)
 
-destroy:
+plan-destroy:
+	terraform -chdir=$(TF_DIR) plan -destroy -var-file=$(VARS_FILE)
+
+destroy-auto:
 	terraform -chdir=$(TF_DIR) destroy -auto-approve -var-file=$(VARS_FILE)
 
 show:

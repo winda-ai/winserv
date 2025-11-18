@@ -18,6 +18,7 @@ on:
         options:
           - plan
           - apply
+          - destroy-auto
           - destroy
 
 permissions:
@@ -100,12 +101,38 @@ jobs:
         if: ${{ github.event.inputs.action == 'apply' }}
         run: make apply ENV=${{ github.event.inputs.environment }}
 
-      - name: Destroy
+      - name: Plan Destroy (show what will be destroyed)
         if: ${{ github.event.inputs.action == 'destroy' }}
-        run: make destroy ENV=${{ github.event.inputs.environment }}
+        run: make plan-destroy ENV=${{ github.event.inputs.environment }}
+
+      - name: Wait for Destroy Confirmation
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: ${{ github.actor }}
+          minimum-approvals: 1
+          issue-title: "🚨 Destroy Infrastructure - ${{ github.event.inputs.environment }}"
+          issue-body: |
+            **Environment:** ${{ github.event.inputs.environment }}
+            **Triggered by:** @${{ github.actor }}
+            **Workflow:** ${{ github.workflow }}
+            **Run:** ${{ github.run_id }}
+            
+            ⚠️ **WARNING: This will destroy all infrastructure resources!**
+            
+            Please review the destroy plan above and approve/deny this destruction.
+            
+            - Comment `approve` to proceed with destroy
+            - Comment `deny` to cancel
+          exclude-workflow-initiator-as-approver: false
+
+      - name: Destroy Auto-Approve
+        if: ${{ github.event.inputs.action == 'destroy-auto' || github.event.inputs.action == 'destroy' }}
+        run: make destroy-auto ENV=${{ github.event.inputs.environment }}
 
       - name: Show Outputs (plan/apply only)
-        if: ${{ github.event.inputs.action != 'destroy' }}
+        if: ${{ github.event.inputs.action != 'destroy' && github.event.inputs.action != 'destroy-auto' }}
         run: make outputs ENV=${{ github.event.inputs.environment }} | tee outputs.txt
 
       - name: Upload Plan Artifact

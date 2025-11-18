@@ -21,3 +21,5 @@ override.tf.json
 
 # Core dumps
 *.core
+
+.bw*
