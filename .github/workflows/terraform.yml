@@ -105,30 +105,8 @@ jobs:
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: make plan-destroy ENV=${{ github.event.inputs.environment }}
 
-      - name: Wait for Destroy Confirmation
-        if: ${{ github.event.inputs.action == 'destroy' }}
-        uses: trstringer/manual-approval@v1
-        with:
-          secret: ${{ github.TOKEN }}
-          approvers: ${{ github.actor }}
-          minimum-approvals: 1
-          issue-title: "🚨 Destroy Infrastructure - ${{ github.event.inputs.environment }}"
-          issue-body: |
-            **Environment:** ${{ github.event.inputs.environment }}
-            **Triggered by:** @${{ github.actor }}
-            **Workflow:** ${{ github.workflow }}
-            **Run:** ${{ github.run_id }}
-            
-            ⚠️ **WARNING: This will destroy all infrastructure resources!**
-            
-            Please review the destroy plan above and approve/deny this destruction.
-            
-            - Comment `approve` to proceed with destroy
-            - Comment `deny` to cancel
-          exclude-workflow-initiator-as-approver: false
-
       - name: Destroy Auto-Approve
-        if: ${{ github.event.inputs.action == 'destroy-auto' || github.event.inputs.action == 'destroy' }}
+        if: ${{ github.event.inputs.action == 'destroy-auto' }}
         run: make destroy-auto ENV=${{ github.event.inputs.environment }}
 
       - name: Show Outputs (plan/apply only)
@@ -144,7 +122,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Outputs (plan/apply)
-        if: ${{ github.event.inputs.action != 'destroy' }}
+        if: ${{ github.event.inputs.action != 'destroy' && github.event.inputs.action != 'destroy-auto' }}
         uses: actions/upload-artifact@v4
         with:
           name: tf-outputs-${{ github.event.inputs.environment }}
@@ -167,5 +145,52 @@ jobs:
             cat outputs.txt >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            
           fi
+
+  destroy-approval:
+    name: Review and Approve Destroy (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.action == 'destroy' }}
+    needs: terraform
+    environment: 
+      name: ${{ format('{0}-destroy', github.event.inputs.environment) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+          cli_config_credentials_token: ''
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Export Terraform SP OIDC environment
+        run: |
+          echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_ENV
+          echo "BW_ACCESS_TOKEN=${{ secrets.BITWARDEN_ACCESS_TOKEN }}" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+
+      - name: Init
+        run: make init ENV=${{ github.event.inputs.environment }}
+
+      - name: Destroy
+        run: make destroy ENV=${{ github.event.inputs.environment }}
+
+      - name: Post Destroy Summary
+        if: always()
+        run: |
+          echo "## 🗑️ Destroy Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Destroyed at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
