@@ -37,6 +37,7 @@ jobs:
     name: Terraform ${{ github.event.inputs.action }} (${{ github.event.inputs.environment }})
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
+    timeout-minutes: 60  # 1 hour timeout for the entire job (including approval wait)
 
     defaults:
       run:
